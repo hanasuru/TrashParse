@@ -5,12 +5,7 @@ TrashParse is a simple tool for analyzing Windows Recycle.Bin files based on $I 
 ## Installation
 
 ```
-$ git clone https://github.com/hanasuru/TrashParse
-$ cd TrashParse/src
-
-$ sudo ln -s `pwd`/trashparse.py /usr/local/bin/trashparse
-$ sudo chmod +x /usr/local/bin/trashparse
-
+$ pip install trashparse
 ```
 
 
@@ -21,7 +16,8 @@ For instances, you can check helper section by passing `-h` or `--help`.
 ```bash
 $ trashparse -h                                                       
 
-usage: trashparse.py [-h] [--sort attribute] [--extract] [--quiet] directory
+usage: trashparse [-h] [--sort attribute] [--write directory] [--quiet]
+                  directory
 
 Simple Recycle.Bin Windows Parser
 
@@ -32,21 +28,24 @@ optional arguments:
   -h, --help            show this help message and exit
   --sort attribute, -s attribute
                         Sort by attribute (name, time, size)
-  --extract, -e         Extract & dump bin into files
-  --quiet, -q           quiet (Don't show list file)
-                                                      
+  --write directory, -w directory
+                        Write $R content into a directory; default="files/"
+  --quiet, -q           quiet (Don't show list file)                                       
 ```
 
 ### Display general info
 
-TrashParse allow you to generate general information by passing directory name that contains any file with `$I and $R file`
+TrashParse allow you to generate general information by passing directory name that contains any file with `$I prefix file`
 
 ```bash
-# trashparse directory of file with $I & $R prefix
 $ trashparse \$RECYCLE.BIN/S-1-5-21-4144826732-2003267707-115468498-1001
 
-Id          Size    Original Path                           Version        Deleted Time (UTC)
-EW83YF.txt  30      D:\samples\test.txt                     Windows 10     2020-11-30 22:12:27
++--------------+----------------------------+------------+------+---------------------+
+|    Index     |        Deleted Time        |  Version   | Size |    Original Path    |
++--------------+----------------------------+------------+------+---------------------+
+| $IEW83YF.txt | 2020-11-30 22:12:27.451000 | Windows 10 |  30  | D:\samples\test.txt |
++--------------+----------------------------+------------+------+---------------------+
+
 
 ```
 
@@ -55,7 +54,7 @@ EW83YF.txt  30      D:\samples\test.txt                     Windows 10     2020-
 TrashParse allow you to extract content based on parsed `fileinfo` from `$I and $R file`
 
 ```bash
-$ trashparse \$RECYCLE.BIN/S-1-5-21-4144826732-2003267707-115468498-1001 -e -q 
+$ trashparse \$RECYCLE.BIN/S-1-5-21-4144826732-2003267707-115468498-1001 -q -w files
 
 $ ls files/
 test.txt

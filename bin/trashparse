@@ -1,0 +1,123 @@
+#!/usr/bin/env python3
+from __future__ import division
+from argparse import ArgumentParser
+from collections import OrderedDict
+
+from trashparse._util import UTCTime
+from trashparse import Trash
+
+from prettytable import PrettyTable
+from glob import glob
+
+import sys
+import os
+
+
+class TrashParse(object):
+    def __init__(self, path):
+        self.results = OrderedDict()
+        self.files = list()
+        self.path = path
+
+    def listfile(self):
+        self.files.extend(
+            glob(os.path.join(self.path, 'INFO2*[! ]'))
+          + glob(os.path.join(self.path, '$I*[! ]'))
+        )
+
+    def parsefile(self):
+        for file in self.files:
+            filename = os.path.basename(file)
+            fileinfo = Trash.inspect(file)
+
+            if fileinfo.type == 'INFO2':
+                continue # Not implemented yet
+            else:
+                self.results[filename] = fileinfo
+
+    def sort_by(self, filter=None):
+
+        if filter == 'size':
+            temp = sorted(
+                self.results.items(), key=lambda x: x[1].info.filesize
+            )
+        elif filter == 'time':
+            temp = sorted(
+                self.results.items(), key=lambda x: x[1].info.deleted_time
+            )
+        elif filter == 'name':
+            temp = sorted(
+                self.results.items(), key=lambda x: x[1].info.path
+            )            
+
+        self.results = OrderedDict(temp)
+
+    def display(self):
+        table = PrettyTable()
+        table.field_names = ['Index', 'Deleted Time', 'Version', 'Size', 'Original Path']
+        
+        for name, data in self.results.items():
+            fileinfo = data.info
+            datetime = UTCTime.time_to_date(fileinfo.deleted_time)
+
+            table.add_row(
+                [
+                    name,
+                    datetime,
+                    fileinfo.version,
+                    fileinfo.filesize,
+                    fileinfo.path,
+                ]
+            )
+
+        print(table)
+
+    def dumpfile(self, target='files'):
+
+        try:
+            os.makedirs(target)
+        except OSError:
+            pass
+
+        file_listed = {}
+        for data in self.results.values():
+            filename = data.info.path.split('\\')[-1]
+            fileinfo = data.info
+            
+            values = file_listed.get(filename, [])
+            if not values:
+                file_listed[filename] = values
+            values.append(filename)
+
+            if len(values) > 1:
+                numbering = '({}).'.format(len(vals)-1)
+                filename = numbering.join(filename.split('.'))
+
+            pathname = os.path.join(target, filename)
+            with open(pathname, 'w') as f:
+                try:
+                    f.write(data.content)
+                except IOError:
+                    os.remove(pathname)
+                    
+
+if __name__ == "__main__":
+    parser = ArgumentParser(description='Simple Recycle.Bin Windows Parser')
+    parser.add_argument('path', metavar='directory', help='target directory')
+    parser.add_argument('--sort', '-s', metavar='attribute', default=None, help='Sort by attribute (name, time, size)')
+    parser.add_argument('--write', '-w', metavar='directory', default=None, help='Write $R content into a directory; default="files/"')
+    parser.add_argument('--quiet', '-q', action='store_true', help='quiet (Don\'t show list file)')
+
+    arguments = parser.parse_args()
+
+    trash = TrashParse(arguments.path)
+    trash.listfile()
+    trash.parsefile()
+    
+    if arguments.sort:
+        trash.sort_by(arguments.sort)
+    if arguments.write:
+        trash.dumpfile(arguments.write)
+    
+    if not arguments.quiet:
+        trash.display()
