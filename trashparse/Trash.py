@@ -1,6 +1,7 @@
 from __future__ import unicode_literals
 from . _helper import bytes_to_long, long_to_bytes
-from . _util import UTCTime
+
+from unidecode import unidecode
 
 import os
 
@@ -16,14 +17,7 @@ except ImportError:
 class Trash(object):
     def __init__(self, path):
         self.handle = open(path, 'rb')
-        self.rawdata = self.handle.read()
-
-    @property
-    def info(self):
-        if self.filename.startswith('$I'):
-            return TrashInfo(self.rawdata)
-
-        return TrashInfo2(self.rawdata)
+        self.data = self.handle.read()
 
     @property
     def name(self):
@@ -34,37 +28,31 @@ class Trash(object):
         return os.path.dirname(self.name)
 
     @property
-    def filename(self):
+    def basename(self):
         return os.path.basename(self.name)
-
-    @property
-    def type(self):
-        if self.filename.startswith('$I'):
-            return '$I'
-
-        return 'INFO2'
 
     @property
     def content(self):
         path = os.path.join(
             self.dirname, '$R'
-          + self.filename[2:]
+          + self.basename[2:]
         )
 
         with open(path) as handle:
             return handle.read()
-            
 
-class TrashInfo(object):
-    def __init__(self, data):
-        self.data = data
+
+class TrashInfo(Trash):
+    @property
+    def index_type(self):
+        return '$I'
 
     @property
     def version(self):
         if bytes_to_long(self.data[:4]) == 2:
-            return 'Windows 10'
+            return 'Win 10'
         
-        return 'Windows Vista/8/8.1'
+        return 'Win Vista-8.1'
 
     @property
     def filesize(self):
@@ -75,13 +63,13 @@ class TrashInfo(object):
         return bytes_to_long(self.data[16:24])
 
     @property
-    def path_length(self):
-        if self.version == 'Windows 10':
+    def original_path_length(self):
+        if self.version == 'Win 10':
             return bytes_to_long(self.data[24:28])
 
     @property
-    def path(self):
-        if self.version == 'Windows 10':
+    def original_path(self):
+        if self.version == 'Win 10':
             pathname = self.data[28:]
         else:
             pathname = self.data[24:]
@@ -91,19 +79,41 @@ class TrashInfo(object):
         except UnicodeError:
             pathname = pathname[::2][:-1].decode('ISO-8859-1')
 
-        return pathname.strip('\x00')
+        return unidecode(pathname).strip('\x00')
+
+    @property
+    def original_name(self):
+        return os.path.basename(
+            self.original_path.replace(
+                '\\', '/'
+            )
+        )
+    
+    @property
+    def extension(self):
+        return os.path.splitext(self.original_name)[-1]
+
+    @property
+    def type(self):
+        if self.extension:
+            return 'file'
+        return 'dir'
 
 
 class TrashInfo2(Trash):
     pass
 
 
+def identify_type(name):
+    assert (
+        name.startswith('$I') or
+        name.startswith('INFO2')
+    ), "cannot identify artifact file '%s'" % (name)
+
+    return '$I' if name.startswith('$I') else 'INFO2'
+
 def inspect(path):
     basename = os.path.basename(path)
+    identified_type = identify_type(basename)
 
-    assert (
-        basename.startswith('$I') or
-        basename.startswith('INFO2')
-    )
-
-    return Trash(path)
+    return TrashInfo(path)

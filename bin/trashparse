@@ -1,9 +1,14 @@
-#!/usr/bin/env python3
-from __future__ import division
+#!/usr/bin/env python
+from __future__ import division, unicode_literals
+
 from argparse import ArgumentParser
 from collections import OrderedDict
+from collections import Counter
 
-from trashparse._util import UTCTime
+from trashparse._util import approximate_date
+from trashparse._util import approximate_size
+from trashparse._util import approximate_time
+
 from trashparse import Trash
 
 from prettytable import PrettyTable
@@ -12,112 +17,177 @@ from glob import glob
 import sys
 import os
 
+FILTER = {
+    'index': 'basename',
+    'time': 'deleted_time',
+    'version': 'version',
+    'size': 'filesize',
+    'name': 'original_path',
+    'extension': 'extension',
+    'type': 'type'
+}
+
+FORMAT = {
+    'csv': 'get_csv_string',
+    'json': 'get_json_string',
+    'html': 'get_html_string',
+}
+
+ORDER = {
+    'ascend': True,
+    'descend': False
+}
+
 
 class TrashParse(object):
-    def __init__(self, path):
+    def __init__(self, path, mode='directory'):
         self.results = OrderedDict()
         self.files = list()
         self.path = path
+        self.mode = mode
 
     def listfile(self):
-        self.files.extend(
-            glob(os.path.join(self.path, 'INFO2*[! ]'))
-          + glob(os.path.join(self.path, '$I*[! ]'))
-        )
+        if self.mode == 'file':
+            self.files.append(self.path)
+        elif self.mode == 'directory':
+            self.files.extend(
+                glob(os.path.join(self.path, 'INFO2*[! ]'))
+              + glob(os.path.join(self.path, '$I*[! ]'))
+            )
+        else:
+            raise Exception('Unrecognized mode')
 
     def parsefile(self):
         for file in self.files:
-            filename = os.path.basename(file)
             fileinfo = Trash.inspect(file)
+            filename = fileinfo.basename
 
-            if fileinfo.type == 'INFO2':
+
+            if fileinfo.index_type == 'INFO2':
                 continue # Not implemented yet
             else:
                 self.results[filename] = fileinfo
 
-    def sort_by(self, filter=None):
+    def sort_by(self, filter=None, order=False):
+        selected_filter = FILTER.get(filter)
+        filter_body = '{}[1].{}'
 
-        if filter == 'size':
+        if selected_filter:
             temp = sorted(
-                self.results.items(), key=lambda x: x[1].info.filesize
+                self.results.items(),
+                key=lambda filter : eval(
+                    filter_body.format('filter', selected_filter)
+                ),
+                reverse=order 
             )
-        elif filter == 'time':
-            temp = sorted(
-                self.results.items(), key=lambda x: x[1].info.deleted_time
-            )
-        elif filter == 'name':
-            temp = sorted(
-                self.results.items(), key=lambda x: x[1].info.path
-            )            
+        else:
+            raise Exception('Unrecognized filter')
 
         self.results = OrderedDict(temp)
 
-    def display(self):
+    def display(self, quiet=False, output_format=None):
         table = PrettyTable()
-        table.field_names = ['Index', 'Deleted Time', 'Version', 'Size', 'Original Path']
+        table.field_names = ['Index', 'Deleted Time', 'Size', 'Type', 'Version', 'Original Path']
         
-        for name, data in self.results.items():
-            fileinfo = data.info
-            datetime = UTCTime.time_to_date(fileinfo.deleted_time)
+        for name, fileinfo in self.results.items():
+            datetime = approximate_date(fileinfo.deleted_time)
+            filesize = approximate_size(fileinfo.filesize)
 
-            table.add_row(
-                [
-                    name,
-                    datetime,
-                    fileinfo.version,
-                    fileinfo.filesize,
-                    fileinfo.path,
-                ]
-            )
+            table.add_row([
+                name,
+                datetime,
+                filesize,
+                fileinfo.type,
+                fileinfo.version,                
+                fileinfo.original_path,
+            ])
 
-        print(table)
+        if not quiet:
+            print(table)
 
-    def dumpfile(self, target='files'):
+        if output_format is not None:
+            self.dumpreport(table, output_format)
 
+
+    def makedir(self, path):
         try:
-            os.makedirs(target)
+            os.makedirs(path)
         except OSError:
             pass
 
-        file_listed = {}
-        for data in self.results.values():
-            filename = data.info.path.split('\\')[-1]
-            fileinfo = data.info
+    def writefile(self, content, path, timestamp):
+        with open(path, 'wb') as handle:
+            handle.write(content.encode())
+        timestamp = approximate_time(timestamp)
+        os.utime(path, (timestamp, timestamp))
+
+    def dumpfile(self, target='files'):
+        self.makedir(target)
+
+        listed = {}
+        for fileinfo in self.results.values():
+            filename = fileinfo.original_name
             
-            values = file_listed.get(filename, [])
+            values = listed.get(filename, list())
             if not values:
-                file_listed[filename] = values
+                listed[filename] = values
             values.append(filename)
 
             if len(values) > 1:
-                numbering = '({}).'.format(len(vals)-1)
-                filename = numbering.join(filename.split('.'))
+                filenum = len(values) - 1
+                name, ext = os.path.splitext(filename)
+                filename = '{} ({}){}'.format(name, filenum, ext)
+            
+            path = os.path.join(target, filename)
+            
+            try:
+                content = fileinfo.content
+                timestamp = fileinfo.deleted_time
+            except IOError:
+                pass
+            else:
+                self.writefile(content, path, timestamp)
 
-            pathname = os.path.join(target, filename)
-            with open(pathname, 'w') as f:
-                try:
-                    f.write(data.content)
-                except IOError:
-                    os.remove(pathname)
-                    
+    def dumpreport(self, table, ext):
+        filename = 'reports.%s' % (ext)
+
+        with open(filename, 'w') as handle:
+            output_body = FORMAT.get(ext)
+            callable_func = getattr(table, output_body)
+            response_body =  callable_func()
+
+            handle.write(response_body)
+        
+        print('')
+        print('[+] Saved output: %s' % (filename))
+
+    def overview(self):
+        print('[+] Recycle.Bin path: %s' % (self.path))
+        print('[+] Processed fileinfo: %s' %(len(self.results)))
+        print('[+] Time zone: UTC [+0000]')
+        print('')
+
 
 if __name__ == "__main__":
     parser = ArgumentParser(description='Simple Recycle.Bin Windows Parser')
-    parser.add_argument('path', metavar='directory', help='target directory')
-    parser.add_argument('--sort', '-s', metavar='attribute', default=None, help='Sort by attribute (name, time, size)')
+    parser.add_argument('path', metavar='pathname', help='target path')
+    parser.add_argument('--mode', metavar='mode', default='directory', help='Inspect mode (file, directory); Default is \'directory\'')
+    parser.add_argument('--output', '-o', metavar='format', help='Write output in csv/json/html format')
+    parser.add_argument('--sort', '-s', metavar='attribute', default=None, help='Sort by attribute (name, time, size, version, extension, index)')
     parser.add_argument('--write', '-w', metavar='directory', default=None, help='Write $R content into a directory; default="files/"')
     parser.add_argument('--quiet', '-q', action='store_true', help='quiet (Don\'t show list file)')
+    parser.add_argument('--ascend', action='store_true', help='List file in ascending instead of descending order')
 
     arguments = parser.parse_args()
 
-    trash = TrashParse(arguments.path)
+    trash = TrashParse(arguments.path, arguments.mode)
     trash.listfile()
     trash.parsefile()
     
     if arguments.sort:
-        trash.sort_by(arguments.sort)
+        trash.sort_by(arguments.sort, arguments.ascend)
     if arguments.write:
         trash.dumpfile(arguments.write)
-    
-    if not arguments.quiet:
-        trash.display()
+
+    trash.overview()    
+    trash.display(arguments.quiet, arguments.output)
