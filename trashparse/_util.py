@@ -44,7 +44,7 @@ class UTCTime(object):
 
 
 def approximate_date(timestamp):
-    return str(UTCTime.time_to_date(timestamp))
+    return UTCTime.time_to_date(timestamp)
 
 def approximate_time(timestamp):
     dt = approximate_date(timestamp)
