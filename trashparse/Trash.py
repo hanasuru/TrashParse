@@ -95,7 +95,7 @@ class TrashInfo(Trash):
 
     @property
     def type(self):
-        if self.extension:
+        if self.extension or self.filesize > 0:
             return 'file'
         return 'dir'
 
